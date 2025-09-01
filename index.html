@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-lang-key="page_title">鲨鱼 VPN - 极速安全，畅享无限</title>
+
+    <script>
+        // --- 1. 核心网址设置 (***最重要***) ---
+        // 说明：请在这里设置您的主网址。页面上所有链接都会自动使用这里的值。
+        const SITE_CONFIG = {
+            url: 'https://shayu1.shayuyun.de',      // 最终要跳转到的完整网址 (例如: 'https://www.google.com')
+            name: 'shayuyun.de'              // 显示在页面底部“永久网址”处的文本 (例如: 'google.com')
+        };
+
+        // --- 2. 其他参数与文本设置 ---
+        const CONFIG = {
+            
+            /**
+             * 页面自动跳转前的倒计时秒数
+             */
+            countdownSeconds: 5,
+
+            /**
+             * 用于在浏览器中保存用户语言选择的键名。
+             * 如果您在同一个域名下部署多个此页面，请为每个页面设置不同的名字，以防互相冲突。
+             */
+            localStorageLangKey: 'shark_vpn_lang_preference',
+            
+            /**
+             * 背景粒子数量。
+             * 注意：数量过高可能会影响在低性能设备上的体验。
+             */
+            particleCount: 15000,
+
+            // --- 3. 页面文本内容设置 (支持多语言) ---
+            translations: {
+                // 中文语言包
+                zh: {
+                    page_title: '鲨鱼 VPN - 极速安全，畅享无限',
+                    main_title: '鲨鱼 VPN',
+                    subtitle: '极速连接，安全畅享，隐私无忧',
+                    countdown_message: '即将跳转至主页',
+                    manual_redirect_button: '立即前往主页',
+                    // 下方的“永久网址”提示会自动使用您在 SITE_CONFIG 中设置的网址，无需手动修改
+                    permanent_url_tip: `请记住我们的永久网址：<a href="${SITE_CONFIG.url}" target="_blank" class="text-blue-300 hover:underline font-semibold">${SITE_CONFIG.name}</a>`,
+                },
+                // 英文语言包
+                en: {
+                    page_title: 'Shark VPN - Ultra-fast, Secure, Unlimited',
+                    main_title: 'Shark VPN',
+                    subtitle: 'High-speed Connection, Secure Access, Privacy Assured',
+                    countdown_message: 'Redirecting to Homepage',
+                    manual_redirect_button: 'Go to Homepage Now',
+                    // The "permanent URL" tip below automatically uses the URL you set in SITE_CONFIG, no manual change needed
+                    permanent_url_tip: `Remember our permanent URL: <a href="${SITE_CONFIG.url}" target="_blank" class="text-blue-300 hover:underline font-semibold">${SITE_CONFIG.name}</a>`,
+                }
+            }
+        };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; overflow: hidden; color: #ffffff; }
+        #mouse-glow { position: fixed; left: 0; top: 0; width: 600px; height: 600px; border-radius: 50%; background: radial-gradient(circle, rgba(74, 144, 226, 0.2) 0%, rgba(74, 144, 226, 0) 60%); transform: translate(-50%, -50%); pointer-events: none; z-index: -2; }
+        #particle-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+        .gradient-bg { background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #000000); background-size: 400% 400%; animation: gradient-animation 20s ease infinite; }
+        @keyframes gradient-animation { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+        @keyframes fade-in-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in-up { opacity: 0; animation: fade-in-up 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        .delay-100 { animation-delay: 0.1s; } .delay-200 { animation-delay: 0.2s; } .delay-300 { animation-delay: 0.3s; } .delay-400 { animation-delay: 0.4s; } .delay-500 { animation-delay: 0.5s; } .delay-600 { animation-delay: 0.6s; }
+        .lang-button { @apply px-4 py-2 text-sm font-semibold rounded-full transition-all duration-300; color: rgba(255, 255, 255, 0.6); background: transparent; border: 1px solid transparent; cursor: pointer; }
+        .lang-button.active { color: #ffffff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.3); text-shadow: 0 0 8px rgba(255, 255, 255, 0.5); }
+        .lang-button:not(.active):hover { color: #ffffff; background: rgba(255, 255, 255, 0.05); }
+        .content-card { background: rgba(0, 0, 0, 0.25); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 2rem; position: relative; overflow: hidden; animation: pulse-border 4s ease-in-out infinite; }
+        @keyframes pulse-border { 0%, 100% { box-shadow: 0 0 25px rgba(74, 144, 226, 0.3), 0 10px 40px rgba(0, 0, 0, 0.3); } 50% { box-shadow: 0 0 50px rgba(74, 144, 226, 0.6), 0 10px 40px rgba(0, 0, 0, 0.3); } }
+        .countdown-container { position: relative; width: 140px; height: 140px; margin: 1.5rem auto; display: flex; justify-content: center; align-items: center; }
+        .countdown-svg { position: absolute; top: 0; left: 0; transform: rotate(-90deg); overflow: visible; }
+        .countdown-circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 8; }
+        .countdown-circle-progress { fill: none; stroke: url(#progressGradient); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; filter: drop-shadow(0 0 5px #4A90E2); }
+        .countdown-content { position: relative; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+        .countdown-number { font-size: 3rem; font-weight: 900; color: #fff; line-height: 1; }
+        .countdown-text { font-size: 0.9rem; font-weight: 500; color: rgba(255, 255, 255, 0.7); margin-top: 4px; }
+        .corner-element { position: absolute; width: 40px; height: 40px; border: 2px solid rgba(255, 255, 255, 0.3); opacity: 0; animation: fade-in-up 1s forwards; animation-delay: 0.5s; }
+        .corner-element.top-left { top: 20px; left: 20px; border-right: none; border-bottom: none; }
+        .corner-element.top-right { top: 20px; right: 20px; border-left: none; border-bottom: none; }
+        .corner-element.bottom-left { bottom: 20px; left: 20px; border-right: none; border-top: none; }
+        .corner-element.bottom-right { bottom: 20px; right: 20px; border-left: none; border-top: none; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen gradient-bg text-white relative">
+
+    <div class="corner-element top-left"></div>
+    <div class="corner-element top-right"></div>
+    <div class="corner-element bottom-left"></div>
+    <div class="corner-element bottom-right"></div>
+
+    <div id="mouse-glow"></div>
+    <div id="particle-canvas"></div>
+
+    <div class="absolute top-8 right-8 flex space-x-2 z-20">
+        <button id="lang-zh" class="lang-button">中文</button>
+        <button id="lang-en" class="lang-button">English</button>
+    </div>
+
+    <div class="text-center p-8 md:p-12 lg:p-16 content-card max-w-2xl w-full mx-4 z-10">
+        <h1 class="text-4xl md:text-6xl font-bold mb-3 animate-fade-in-up delay-100" data-lang-key="main_title"></h1>
+        <p class="text-lg md:text-2xl font-light mb-4 animate-fade-in-up delay-200 text-gray-200" data-lang-key="subtitle"></p>
+        <div class="countdown-container animate-fade-in-up delay-300">
+            <svg class="countdown-svg" width="140" height="140" viewBox="0 0 140 140">
+                <defs>
+                    <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#89f7fe" /><stop offset="100%" stop-color="#66a6ff" />
+                    </linearGradient>
+                </defs>
+                <circle class="countdown-circle-bg" cx="70" cy="70" r="66"></circle>
+                <circle id="countdown-progress-circle" class="countdown-circle-progress" cx="70" cy="70" r="66"></circle>
+            </svg>
+            <div class="countdown-content">
+                <div id="countdown-seconds" class="countdown-number"></div>
+                <div id="countdown-message" class="countdown-text" data-lang-key="countdown_message"></div>
+            </div>
+        </div>
+        <a id="manual-redirect-link" href="#"
+           class="inline-flex items-center gap-2 px-8 py-3 bg-white text-blue-800 font-bold text-lg rounded-full shadow-lg hover:bg-blue-100 hover:text-blue-900 transition-all duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-105 animate-fade-in-up delay-500"
+           data-lang-key="manual_redirect_button">
+            <span></span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="feather feather-arrow-right"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </a>
+        <div class="mt-8 pt-6 border-t border-white/10 animate-fade-in-up delay-600">
+            <p class="text-sm opacity-80 font-medium" data-lang-key="permanent_url_tip"></p>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- START: Three.js Particle Background ---
+        let scene, camera, renderer, mouseX = 0, mouseY = 0;
+        let stars;
+        let particleSpeed = 2;
+        let targetParticleSpeed = 2;
+
+        function initParticles() {
+            try {
+                scene = new THREE.Scene();
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000); 
+                camera.position.z = 5;
+
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                document.getElementById('particle-canvas').appendChild(renderer.domElement);
+
+                const starCount = CONFIG.particleCount;
+                const positions = new Float32Array(starCount * 3);
+                const geometry = new THREE.BufferGeometry();
+                
+                for (let i = 0; i < starCount; i++) {
+                    positions[i * 3] = (Math.random() - 0.5) * 3000;
+                    positions[i * 3 + 1] = (Math.random() - 0.5) * 3000;
+                    positions[i * 3 + 2] = (Math.random() - 0.5) * 3000;
+                }
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                
+                const material = new THREE.PointsMaterial({
+                    size: 2.0, color: 0xffffff, transparent: true,
+                    opacity: 0.8, blending: THREE.AdditiveBlending
+                });
+
+                stars = new THREE.Points(geometry, material);
+                scene.add(stars);
+
+                window.addEventListener('resize', onWindowResize, false);
+                document.addEventListener('mousemove', onDocumentMouseMove, false);
+                
+                animateParticles();
+            } catch (e) { console.error("粒子效果初始化失败:", e); }
+        }
+
+        function onDocumentMouseMove(event) {
+            mouseX = event.clientX - window.innerWidth / 2;
+            mouseY = event.clientY - window.innerHeight / 2;
+        }
+
+        function animateParticles() {
+            requestAnimationFrame(animateParticles);
+            if (!stars) return;
+            particleSpeed += (targetParticleSpeed - particleSpeed) * 0.05;
+            const positions = stars.geometry.attributes.position.array;
+            for (let i = 0; i < positions.length; i += 3) {
+                positions[i + 2] += particleSpeed;
+                if (positions[i + 2] > 1000) positions[i + 2] = -2000;
+            }
+            stars.geometry.attributes.position.needsUpdate = true;
+            stars.rotation.y = mouseX * 0.00005; 
+            stars.rotation.x = mouseY * 0.00005;
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        initParticles();
+        // --- END: Three.js Particle Background ---
+
+
+        // --- START: Countdown and Language Logic ---
+        const redirectUrl = SITE_CONFIG.url;
+        const countdownNumberElement = document.getElementById('countdown-seconds');
+        const progressCircle = document.getElementById('countdown-progress-circle');
+        const radius = progressCircle.r.baseVal.value;
+        const circumference = 2 * Math.PI * radius;
+        progressCircle.style.strokeDasharray = `${circumference} ${circumference}`;
+        progressCircle.style.strokeDashoffset = circumference;
+        const manualRedirectLink = document.getElementById('manual-redirect-link');
+        manualRedirectLink.href = redirectUrl;
+        const langZhButton = document.getElementById('lang-zh');
+        const langEnButton = document.getElementById('lang-en');
+        const translations = CONFIG.translations;
+
+        let currentLang = localStorage.getItem(CONFIG.localStorageLangKey) || 'zh';
+        let countdown = CONFIG.countdownSeconds;
+        let interval = null;
+
+        function setProgress(percent) {
+            const offset = circumference - (percent / 100) * circumference;
+            progressCircle.style.strokeDashoffset = offset;
+        }
+
+        function triggerExitAnimation() {
+            const contentCard = document.querySelector('.content-card');
+            contentCard.style.transition = 'opacity 0.7s ease-in, transform 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55)';
+            contentCard.style.opacity = '0';
+            contentCard.style.transform = 'scale(0) rotate(35deg)';
+            targetParticleSpeed = 100;
+        }
+
+        function updateCountdown() {
+            countdownNumberElement.textContent = countdown;
+            const totalSeconds = CONFIG.countdownSeconds;
+            const progressPercentage = ((totalSeconds - countdown) / totalSeconds) * 100;
+            setProgress(progressPercentage);
+
+            const minSpeed = 2, maxSpeed = 70;
+            const progress = (totalSeconds - countdown) / totalSeconds;
+            if (countdown > 0) {
+                targetParticleSpeed = minSpeed + (maxSpeed - minSpeed) * Math.pow(progress, 3);
+            }
+
+            if (countdown === 1) triggerExitAnimation();
+
+            if (countdown <= 0) {
+                clearInterval(interval);
+                window.location.href = redirectUrl;
+            } else {
+                countdown--;
+            }
+        }
+
+        manualRedirectLink.addEventListener('click', function(event) {
+            event.preventDefault();
+            if (interval) clearInterval(interval);
+            triggerExitAnimation();
+            setTimeout(() => { window.location.href = redirectUrl; }, 700);
+        });
+        
+        function switchLanguage(lang) {
+            if (currentLang === lang && interval !== null) return;
+            currentLang = lang;
+            localStorage.setItem(CONFIG.localStorageLangKey, lang);
+
+            document.querySelectorAll('[data-lang-key]').forEach(element => {
+                const key = element.getAttribute('data-lang-key'); 
+                if (translations[currentLang][key]) {
+                    if (key === 'permanent_url_tip') {
+                        element.innerHTML = translations[currentLang][key];
+                    } else if (element.tagName === 'A' || element.tagName === 'BUTTON') {
+                        const textNode = element.querySelector('span') || element;
+                        textNode.textContent = translations[currentLang][key];
+                    } else {
+                        element.textContent = translations[currentLang][key];
+                    }
+                }
+            });
+
+            langZhButton.classList.toggle('active', lang === 'zh');
+            langEnButton.classList.toggle('active', lang === 'en');
+
+            if (interval) clearInterval(interval);
+            countdown = CONFIG.countdownSeconds;
+            particleSpeed = 2;
+            targetParticleSpeed = 2;
+
+            const contentCard = document.querySelector('.content-card');
+            contentCard.style.transition = 'none';
+            contentCard.style.opacity = '1';
+            contentCard.style.transform = 'scale(1) rotate(0deg)';
+            
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                     updateCountdown();
+                     interval = setInterval(updateCountdown, 1000);
+                });
+            });
+        }
+        
+        langZhButton.addEventListener('click', () => switchLanguage('zh'));
+        langEnButton.addEventListener('click', () => switchLanguage('en'));
+        
+        switchLanguage(currentLang);
+        // --- END: Countdown and Language Logic ---
+    });
+    </script>
+</body>
+</html>
