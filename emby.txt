@@ -10,8 +10,8 @@ const mapCfg = {
 };
 
 // ===== EMOS 身份 =====
-const EMOS_ID   = 'eABCDEFGHs';
-const EMOS_NAME = '@emos';
+const EMOS_ID   = 'eG3X6K49Ys';
+const EMOS_NAME = '@haotian';
 
 // ===== 缓存配置 =====
 const IMAGE_TTL = 86400;
