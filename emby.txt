@@ -5,7 +5,6 @@ const mapCfg = {
     "emby1.798777.xyz":  "https://link01.okemby.org:8443",
     "emby2.798777.xyz":  "https://emos.best:443"
   },
-  main: "https://link01.okemby.org:8443",
   cors: true
 };
 
@@ -13,12 +12,13 @@ const mapCfg = {
 const EMOS_ID   = 'eG3X6K49Ys';
 const EMOS_NAME = '@haotian';
 
-// ===== 缓存配置 =====
-const IMAGE_TTL = 86400; // 1 天
-const PING_TTL  = 60;    // 60 秒
+// ===== 缓存 & 节流配置 =====
+const IMAGE_TTL    = 86400; // 图片 1 天
+const PING_TTL     = 60;    // Ping 60 秒
+const PROGRESS_TTL = 3;     // Progress 节流 3 秒
 
 export default {
-  async fetch(req, env, ctx) {
+  async fetch(req) {
 
     /* ===== CORS 预检 ===== */
     if (req.method === 'OPTIONS') {
@@ -36,22 +36,18 @@ export default {
     const rawUrl = new URL(req.url);
     const host   = rawUrl.hostname;
 
-    /* ===== Host 分流 ===== */
-    const target = mapCfg.hosts[host] || mapCfg.main;
+    /* ===== Host 白名单校验（核心）===== */
+    const target = mapCfg.hosts[host];
+    if (!target) {
+      return new Response('Invalid Host', { status: 403 });
+    }
+
     const isEmos = host === 'emby2.798777.xyz';
 
     const tUrl     = new URL(target);
     const finalUrl = new URL(rawUrl.pathname + rawUrl.search, tUrl);
 
-    /* ===== 请求类型识别 ===== */
-
-    // 🎯 视频流（TV 必须完全绕开 Worker 内存）
-    const isVideo =
-      rawUrl.pathname.startsWith('/emby/Videos/') ||
-      rawUrl.pathname.startsWith('/emby/Audio/') ||
-      req.headers.has('Range');
-
-    // 图片（仅 EMOS）
+    /* ===== 类型识别（等价原 /2）===== */
     const isImage =
       isEmos &&
       req.method === 'GET' &&
@@ -59,22 +55,47 @@ export default {
       rawUrl.pathname.includes('/Images/') &&
       !req.headers.has('Range');
 
-    // Ping
     const isPing =
       isEmos &&
       req.method === 'GET' &&
       rawUrl.pathname === '/emby/System/Ping';
 
-    /* ===== 构造请求头 ===== */
+    const isProgress =
+      isEmos &&
+      req.method === 'POST' &&
+      rawUrl.pathname === '/emby/Sessions/Playing/Progress';
+
+    /* ===== Progress 节流（TV 稳定关键）===== */
+    if (isProgress) {
+      const cache = caches.default;
+      const key = `progress:${req.headers.get('X-Emby-Device-Id') || 'tv'}`;
+
+      if (await cache.match(key)) {
+        return new Response(null, { status: 204 });
+      }
+
+      await cache.put(
+        key,
+        new Response('1', {
+          headers: { 'Cache-Control': `max-age=${PROGRESS_TTL}` }
+        })
+      );
+    }
+
+    /* ===== 图片 / Ping Cache ===== */
+    const cache = caches.default;
+    if (isImage || isPing) {
+      const cached = await cache.match(finalUrl.toString());
+      if (cached) return cached;
+    }
+
+    /* ===== 构造请求头（与你 /1 稳定版完全一致）===== */
     const h = new Headers(req.headers);
 
-    // Host
     h.set('Host', tUrl.host);
-
-    // Origin / Referer（EMOS 图片不裂的关键）
     const origin = `${tUrl.protocol}//${tUrl.hostname}`;
-    h.set('Origin', origin);
-    h.set('Referer', origin);
+    if (h.has('Referer')) h.set('Referer', origin);
+    if (h.has('Origin'))  h.set('Origin', origin);
 
     /* ===== EMOS 必须头 ===== */
     if (isEmos) {
@@ -88,42 +109,17 @@ export default {
       }
     }
 
-    /* ===== 图片禁止 304 ===== */
+    /* ===== 图片请求禁止 304 ===== */
     if (isImage) {
       h.delete('If-None-Match');
       h.delete('If-Modified-Since');
     }
 
-    /* ======================================================
-       🎯 视频流：直接透传（TV 不断流核心）
-       ====================================================== */
-    if (isVideo) {
-      return fetch(new Request(finalUrl.toString(), {
-        method: req.method,
-        headers: h,
-        body: req.body,
-        redirect: 'manual', // ❗关键：禁止 follow
-        duplex: 'half'
-      }));
-    }
-
-    /* ===== Worker Cache（仅图片 / Ping）===== */
-    const cache = caches.default;
-    const cacheKey = isImage
-      ? `${tUrl.origin}${rawUrl.pathname}` // 图片去 query
-      : finalUrl.toString();
-
-    if (isImage || isPing) {
-      const cached = await cache.match(cacheKey);
-      if (cached) return cached;
-    }
-
-    /* ===== 普通请求 ===== */
     const newReq = new Request(finalUrl.toString(), {
       method: req.method,
       headers: h,
       body: req.body,
-      redirect: 'manual',
+      redirect: 'follow',
       duplex: 'half'
     });
 
@@ -131,14 +127,12 @@ export default {
       const res  = await fetch(newReq);
       const resH = new Headers(res.headers);
 
-      /* ===== CORS ===== */
       if (mapCfg.cors) {
         resH.set('Access-Control-Allow-Origin', '*');
         resH.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         resH.set('Access-Control-Allow-Headers', '*');
       }
 
-      /* ===== 写缓存 ===== */
       if ((isImage || isPing) && res.ok) {
         const ttl = isImage ? IMAGE_TTL : PING_TTL;
         resH.set('Cache-Control', `public, max-age=${ttl}`);
@@ -148,7 +142,7 @@ export default {
           headers: resH
         });
 
-        ctx.waitUntil(cache.put(cacheKey, cachedRes.clone()));
+        caches.default.put(finalUrl.toString(), cachedRes.clone());
         return cachedRes;
       }
 
