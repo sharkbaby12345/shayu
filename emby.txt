@@ -9,13 +9,13 @@ const mapCfg = {
   cors: true
 };
 
-// ===== EMOS 身份（一定要是你自己的）=====
+// ===== EMOS 身份 =====
 const EMOS_ID   = 'eABCDEFGHs';
 const EMOS_NAME = '@emos';
 
 // ===== 缓存配置 =====
-const IMAGE_TTL = 86400; // 1 天
-const PING_TTL  = 60;    // 60 秒
+const IMAGE_TTL = 86400;
+const PING_TTL  = 60;
 
 export default {
   async fetch(req) {
@@ -36,44 +36,48 @@ export default {
     const rawUrl = new URL(req.url);
     const host   = rawUrl.hostname;
 
-    /* ===== Host 分流（等价 /1 /2）===== */
+    /* ===== Host 分流 ===== */
     const target = mapCfg.hosts[host] || mapCfg.main;
     const isEmos = host === 'emby2.798777.xyz';
 
     const tUrl     = new URL(target);
     const finalUrl = new URL(rawUrl.pathname + rawUrl.search, tUrl);
 
-    /* ===== 识别缓存类型（逻辑不变）===== */
+    /* ===== 类型识别 ===== */
     const isImage =
       isEmos &&
       req.method === 'GET' &&
       rawUrl.pathname.startsWith('/emby/Items/') &&
-      rawUrl.pathname.includes('/Images/');
+      rawUrl.pathname.includes('/Images/') &&
+      !req.headers.has('Range');
 
     const isPing =
       isEmos &&
       req.method === 'GET' &&
       rawUrl.pathname === '/emby/System/Ping';
 
-    /* ===== Worker Cache ===== */
+    /* ===== Cache Key（图片去 query）===== */
+    const cacheKey = isImage
+      ? `${tUrl.origin}${rawUrl.pathname}`
+      : finalUrl.toString();
+
     const cache = caches.default;
     if (isImage || isPing) {
-      const cached = await cache.match(finalUrl.toString());
+      const cached = await cache.match(cacheKey);
       if (cached) return cached;
     }
 
-    /* ===== 构造请求头（保持你“能正常显示图片”的写法）===== */
+    /* ===== 请求头 ===== */
     const h = new Headers(req.headers);
 
-    // Host
     h.set('Host', tUrl.host);
 
-    // Origin / Referer（不乱改，避免 EMOS 图裂）
+    // Origin / Referer（强制，最稳）
     const origin = `${tUrl.protocol}//${tUrl.hostname}`;
-    if (h.has('Referer')) h.set('Referer', origin);
-    if (h.has('Origin'))  h.set('Origin', origin);
+    h.set('Origin', origin);
+    h.set('Referer', origin);
 
-    /* ===== EMOS 专用头 ===== */
+    /* ===== EMOS 必须头 ===== */
     if (isEmos) {
       h.set('EMOS-PROXY-ID', EMOS_ID);
       h.set('EMOS-PROXY-NAME', EMOS_NAME);
@@ -85,13 +89,11 @@ export default {
       }
     }
 
-    /* ===== 图片请求：禁止 304 ===== */
     if (isImage) {
       h.delete('If-None-Match');
       h.delete('If-Modified-Since');
     }
 
-    /* ===== 发起上游请求（支持 Range / 206）===== */
     const newReq = new Request(finalUrl.toString(), {
       method: req.method,
       headers: h,
@@ -104,14 +106,12 @@ export default {
       const res  = await fetch(newReq);
       const resH = new Headers(res.headers);
 
-      /* ===== CORS ===== */
       if (mapCfg.cors) {
         resH.set('Access-Control-Allow-Origin', '*');
         resH.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         resH.set('Access-Control-Allow-Headers', '*');
       }
 
-      /* ===== 写缓存 ===== */
       if ((isImage || isPing) && res.ok) {
         const ttl = isImage ? IMAGE_TTL : PING_TTL;
         resH.set('Cache-Control', `public, max-age=${ttl}`);
@@ -121,13 +121,12 @@ export default {
           headers: resH
         });
 
-        caches.default.put(finalUrl.toString(), cachedRes.clone());
+        caches.default.put(cacheKey, cachedRes.clone());
         return cachedRes;
       }
 
       return new Response(res.body, {
         status: res.status,
-        statusText: res.statusText,
         headers: resH
       });
 
