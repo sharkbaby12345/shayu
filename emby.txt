@@ -8,14 +8,13 @@ const mapCfg = {
   cors: true
 };
 
-// ===== EMOS 身份（必须是你自己的）=====
+// ===== EMOS 身份 =====
 const EMOS_ID   = 'eG3X6K49Ys';
 const EMOS_NAME = '@haotian';
 
-// ===== 缓存 & 节流配置 =====
-const IMAGE_TTL    = 86400; // 图片 1 天
-const PING_TTL     = 60;    // Ping 60 秒
-const PROGRESS_TTL = 3;     // Progress 节流 3 秒
+// ===== 缓存 =====
+const IMAGE_TTL = 86400; // 1 天
+const PING_TTL  = 60;    // 60 秒
 
 export default {
   async fetch(req) {
@@ -36,7 +35,7 @@ export default {
     const rawUrl = new URL(req.url);
     const host   = rawUrl.hostname;
 
-    /* ===== Host 白名单校验（核心）===== */
+    /* ===== Host 校验（非常重要）===== */
     const target = mapCfg.hosts[host];
     if (!target) {
       return new Response('Invalid Host', { status: 403 });
@@ -47,7 +46,7 @@ export default {
     const tUrl     = new URL(target);
     const finalUrl = new URL(rawUrl.pathname + rawUrl.search, tUrl);
 
-    /* ===== 类型识别（等价原 /2）===== */
+    /* ===== 类型识别 ===== */
     const isImage =
       isEmos &&
       req.method === 'GET' &&
@@ -60,28 +59,6 @@ export default {
       req.method === 'GET' &&
       rawUrl.pathname === '/emby/System/Ping';
 
-    const isProgress =
-      isEmos &&
-      req.method === 'POST' &&
-      rawUrl.pathname === '/emby/Sessions/Playing/Progress';
-
-    /* ===== Progress 节流（TV 稳定关键）===== */
-    if (isProgress) {
-      const cache = caches.default;
-      const key = `progress:${req.headers.get('X-Emby-Device-Id') || 'tv'}`;
-
-      if (await cache.match(key)) {
-        return new Response(null, { status: 204 });
-      }
-
-      await cache.put(
-        key,
-        new Response('1', {
-          headers: { 'Cache-Control': `max-age=${PROGRESS_TTL}` }
-        })
-      );
-    }
-
     /* ===== 图片 / Ping Cache ===== */
     const cache = caches.default;
     if (isImage || isPing) {
@@ -89,16 +66,17 @@ export default {
       if (cached) return cached;
     }
 
-    /* ===== 构造请求头（与你 /1 稳定版完全一致）===== */
+    /* ===== 构造请求头 ===== */
     const h = new Headers(req.headers);
 
-    h.set('Host', tUrl.host);
-    const origin = `${tUrl.protocol}//${tUrl.hostname}`;
-    if (h.has('Referer')) h.set('Referer', origin);
-    if (h.has('Origin'))  h.set('Origin', origin);
-
-    /* ===== EMOS 必须头 ===== */
+    /* 仅 EMOS 才改 Host / Origin */
     if (isEmos) {
+      h.set('Host', tUrl.host);
+
+      const origin = `${tUrl.protocol}//${tUrl.hostname}`;
+      h.set('Origin', origin);
+      h.set('Referer', origin);
+
       h.set('EMOS-PROXY-ID', EMOS_ID);
       h.set('EMOS-PROXY-NAME', EMOS_NAME);
 
@@ -109,7 +87,6 @@ export default {
       }
     }
 
-    /* ===== 图片请求禁止 304 ===== */
     if (isImage) {
       h.delete('If-None-Match');
       h.delete('If-Modified-Since');
