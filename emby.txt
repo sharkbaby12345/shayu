@@ -1,39 +1,43 @@
 const mapCfg = {
   hosts: {
     "okemby.798777.xyz":  "https://link01.okemby.org:8443",
-    "emby.798777.xyz":    "https://link01.okemby.org:8443",
-    "emby1.798777.xyz":   "https://link01.okemby.org:8443",
-    "emby2.798777.xyz":   "https://emos.best:443"
+    "emby.798777.xyz":   "https://link01.okemby.org:8443",
+    "emby1.798777.xyz":  "https://link01.okemby.org:8443",
+    "emby2.798777.xyz":  "https://emos.best:443"
   },
   cors: true
 };
 
-// ===== EMOS 身份 =====
-const EMOS_ID   = 'eG3X6K49Ys';
-const EMOS_NAME = '@haotian';
+// ===== EMOS 身份（只对 emby2 生效）=====
+const EMOS_ID   = "eG3X6K49Ys";
+const EMOS_NAME = "@haotian";
 
-// ===== 缓存 =====
-const IMAGE_TTL = 86400;
+// ===== 缓存策略（TV 优先）=====
+const IMAGE_TTL = 604800; // 图片 7 天（关键）
 const PING_TTL  = 60;
 
 export default {
   async fetch(req) {
 
-    /* ===== 禁用 WebSocket（核心修复） ===== */
-    const upgrade = req.headers.get('Upgrade');
-    if (upgrade && upgrade.toLowerCase() === 'websocket') {
+    /* =======================================================
+       1️⃣ 禁用 WebSocket（核心：解决 okemby 502）
+       ======================================================= */
+    const upgrade = req.headers.get("Upgrade");
+    if (upgrade && upgrade.toLowerCase() === "websocket") {
       return new Response(null, { status: 204 });
     }
 
-    /* ===== CORS 预检 ===== */
-    if (req.method === 'OPTIONS') {
+    /* =======================================================
+       2️⃣ CORS 预检
+       ======================================================= */
+    if (req.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
         headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': '*',
-          'Access-Control-Max-Age': '86400'
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "*",
+          "Access-Control-Max-Age": "86400"
         }
       });
     }
@@ -42,77 +46,106 @@ export default {
     const host   = rawUrl.hostname;
     const target = mapCfg.hosts[host];
 
+    /* Host 白名单校验 */
     if (!target) {
-      return new Response('Host not allowed', { status: 403 });
+      return new Response("Host not allowed", { status: 403 });
     }
 
-    const isEmos = host === 'emby2.798777.xyz';
+    const isEmos = host === "emby2.798777.xyz";
     const tUrl   = new URL(target);
     const finalUrl = new URL(rawUrl.pathname + rawUrl.search, tUrl);
 
-    /* ===== 类型识别 ===== */
+    /* =======================================================
+       3️⃣ 请求类型识别（放宽图片缓存条件）
+       ======================================================= */
     const isImage =
-      req.method === 'GET' &&
-      rawUrl.pathname.startsWith('/emby/Items/') &&
-      rawUrl.pathname.includes('/Images/') &&
-      !req.headers.has('Range');
+      req.method === "GET" &&
+      rawUrl.pathname.startsWith("/emby/Items/") &&
+      rawUrl.pathname.includes("/Images/");
 
     const isPing =
-      req.method === 'GET' &&
-      rawUrl.pathname === '/emby/System/Ping';
+      req.method === "GET" &&
+      rawUrl.pathname === "/emby/System/Ping";
 
-    /* ===== 图片 / Ping Cache ===== */
+    /* =======================================================
+       4️⃣ Cache 命中（图片 / Ping）
+       ======================================================= */
     const cache = caches.default;
     if (isImage || isPing) {
       const cached = await cache.match(finalUrl.toString());
       if (cached) return cached;
     }
 
-    /* ===== 构造请求头 ===== */
+    /* =======================================================
+       5️⃣ 构造请求头（不破坏视频 / Range）
+       ======================================================= */
     const h = new Headers(req.headers);
 
     if (isEmos) {
-      h.set('Host', tUrl.host);
-      const origin = `${tUrl.protocol}//${tUrl.hostname}`;
-      h.set('Origin', origin);
-      h.set('Referer', origin);
-      h.set('EMOS-PROXY-ID', EMOS_ID);
-      h.set('EMOS-PROXY-NAME', EMOS_NAME);
+      // EMOS 要求
+      h.set("Host", tUrl.host);
 
-      const cfip = req.headers.get('CF-Connecting-IP');
-      if (cfip) h.set('X-Forwarded-For', cfip);
+      const origin = `${tUrl.protocol}//${tUrl.hostname}`;
+      h.set("Origin", origin);
+      h.set("Referer", origin);
+
+      h.set("EMOS-PROXY-ID", EMOS_ID);
+      h.set("EMOS-PROXY-NAME", EMOS_NAME);
+
+      const cfip = req.headers.get("CF-Connecting-IP");
+      if (cfip) h.set("X-Forwarded-For", cfip);
     }
 
+    // 图片：强制走缓存（TV 流畅关键）
     if (isImage) {
-      h.delete('If-None-Match');
-      h.delete('If-Modified-Since');
+      h.delete("If-None-Match");
+      h.delete("If-Modified-Since");
+      h.delete("Cache-Control");
+      h.delete("Pragma");
     }
 
     const newReq = new Request(finalUrl.toString(), {
       method: req.method,
       headers: h,
       body: req.body,
-      redirect: 'follow',
-      duplex: 'half'
+      redirect: "follow",
+      duplex: "half" // 视频 206 必须
     });
 
-    const res = await fetch(newReq);
+    /* =======================================================
+       6️⃣ 回源请求
+       ======================================================= */
+    const res  = await fetch(newReq);
     const resH = new Headers(res.headers);
 
     if (mapCfg.cors) {
-      resH.set('Access-Control-Allow-Origin', '*');
-      resH.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      resH.set('Access-Control-Allow-Headers', '*');
+      resH.set("Access-Control-Allow-Origin", "*");
+      resH.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      resH.set("Access-Control-Allow-Headers", "*");
     }
 
+    /* =======================================================
+       7️⃣ 写入缓存
+       ======================================================= */
     if ((isImage || isPing) && res.ok) {
       const ttl = isImage ? IMAGE_TTL : PING_TTL;
-      resH.set('Cache-Control', `public, max-age=${ttl}`);
-      const cachedRes = new Response(res.body, { status: res.status, headers: resH });
+      resH.set("Cache-Control", `public, max-age=${ttl}`);
+
+      const cachedRes = new Response(res.body, {
+        status: res.status,
+        headers: resH
+      });
+
       cache.put(finalUrl.toString(), cachedRes.clone());
       return cachedRes;
     }
 
-    return new Response(res.body, { status: res.status, headers: resH });
+    /* =======================================================
+       8️⃣ 普通返回（视频 / API）
+       ======================================================= */
+    return new Response(res.body, {
+      status: res.status,
+      headers: resH
+    });
   }
 };
