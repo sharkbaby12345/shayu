@@ -1,9 +1,9 @@
 const mapCfg = {
   hosts: {
-    "okemby.798777.xyz": "https://link01.okemby.org:8443",
-    "emby.798777.xyz":   "https://link01.okemby.org:8443",
-    "emby1.798777.xyz":  "https://link01.okemby.org:8443",
-    "emby2.798777.xyz":  "https://emos.best:443"
+    "okemby.798777.xyz":  "https://link01.okemby.org:8443",
+    "emby.798777.xyz":    "https://link01.okemby.org:8443",
+    "emby1.798777.xyz":   "https://link01.okemby.org:8443",
+    "emby2.798777.xyz":   "https://emos.best:443"
   },
   cors: true
 };
@@ -13,11 +13,17 @@ const EMOS_ID   = 'eG3X6K49Ys';
 const EMOS_NAME = '@haotian';
 
 // ===== 缓存 =====
-const IMAGE_TTL = 86400; // 1 天
-const PING_TTL  = 60;    // 60 秒
+const IMAGE_TTL = 86400;
+const PING_TTL  = 60;
 
 export default {
   async fetch(req) {
+
+    /* ===== 禁用 WebSocket（核心修复） ===== */
+    const upgrade = req.headers.get('Upgrade');
+    if (upgrade && upgrade.toLowerCase() === 'websocket') {
+      return new Response(null, { status: 204 });
+    }
 
     /* ===== CORS 预检 ===== */
     if (req.method === 'OPTIONS') {
@@ -34,28 +40,24 @@ export default {
 
     const rawUrl = new URL(req.url);
     const host   = rawUrl.hostname;
-
-    /* ===== Host 校验（非常重要）===== */
     const target = mapCfg.hosts[host];
+
     if (!target) {
-      return new Response('Invalid Host', { status: 403 });
+      return new Response('Host not allowed', { status: 403 });
     }
 
     const isEmos = host === 'emby2.798777.xyz';
-
-    const tUrl     = new URL(target);
+    const tUrl   = new URL(target);
     const finalUrl = new URL(rawUrl.pathname + rawUrl.search, tUrl);
 
     /* ===== 类型识别 ===== */
     const isImage =
-      isEmos &&
       req.method === 'GET' &&
       rawUrl.pathname.startsWith('/emby/Items/') &&
       rawUrl.pathname.includes('/Images/') &&
       !req.headers.has('Range');
 
     const isPing =
-      isEmos &&
       req.method === 'GET' &&
       rawUrl.pathname === '/emby/System/Ping';
 
@@ -69,22 +71,16 @@ export default {
     /* ===== 构造请求头 ===== */
     const h = new Headers(req.headers);
 
-    /* 仅 EMOS 才改 Host / Origin */
     if (isEmos) {
       h.set('Host', tUrl.host);
-
       const origin = `${tUrl.protocol}//${tUrl.hostname}`;
       h.set('Origin', origin);
       h.set('Referer', origin);
-
       h.set('EMOS-PROXY-ID', EMOS_ID);
       h.set('EMOS-PROXY-NAME', EMOS_NAME);
 
       const cfip = req.headers.get('CF-Connecting-IP');
-      const xff  = req.headers.get('X-Forwarded-For');
-      if (cfip) {
-        h.set('X-Forwarded-For', xff ? `${xff}, ${cfip}` : cfip);
-      }
+      if (cfip) h.set('X-Forwarded-For', cfip);
     }
 
     if (isImage) {
@@ -100,36 +96,23 @@ export default {
       duplex: 'half'
     });
 
-    try {
-      const res  = await fetch(newReq);
-      const resH = new Headers(res.headers);
+    const res = await fetch(newReq);
+    const resH = new Headers(res.headers);
 
-      if (mapCfg.cors) {
-        resH.set('Access-Control-Allow-Origin', '*');
-        resH.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        resH.set('Access-Control-Allow-Headers', '*');
-      }
-
-      if ((isImage || isPing) && res.ok) {
-        const ttl = isImage ? IMAGE_TTL : PING_TTL;
-        resH.set('Cache-Control', `public, max-age=${ttl}`);
-
-        const cachedRes = new Response(res.body, {
-          status: res.status,
-          headers: resH
-        });
-
-        caches.default.put(finalUrl.toString(), cachedRes.clone());
-        return cachedRes;
-      }
-
-      return new Response(res.body, {
-        status: res.status,
-        headers: resH
-      });
-
-    } catch (err) {
-      return new Response(err.message || 'Upstream fetch error', { status: 502 });
+    if (mapCfg.cors) {
+      resH.set('Access-Control-Allow-Origin', '*');
+      resH.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      resH.set('Access-Control-Allow-Headers', '*');
     }
+
+    if ((isImage || isPing) && res.ok) {
+      const ttl = isImage ? IMAGE_TTL : PING_TTL;
+      resH.set('Cache-Control', `public, max-age=${ttl}`);
+      const cachedRes = new Response(res.body, { status: res.status, headers: resH });
+      cache.put(finalUrl.toString(), cachedRes.clone());
+      return cachedRes;
+    }
+
+    return new Response(res.body, { status: res.status, headers: resH });
   }
 };
