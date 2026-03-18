@@ -1,24 +1,24 @@
 /**
- * Cloudflare Workers – Emby All-Client Stable Proxy (FINAL)
+ * Cloudflare Workers – Emby All-Client Stable Proxy (Enhanced Stable)
  *
  * 适用客户端：
  * - Android
  * - iOS (AVPlayer / WebView)
  * - Android TV
  *
- * 设计原则：
- * - TV 优先（Range / Seek 绝对稳定）
+ * 设计目标：
+ * - Seek 绝对稳定
  * - 不缓存媒体
+ * - 连接池合并
  * - 图片对非 EMOS 直连
  * - Header 最小干预
  */
 
 const mapCfg = {
   hosts: {
-    "okemby.798777.xyz":  "https://link01.okemby.org:8443",
-    "emby.798777.xyz":    "https://link01.okemby.org:8443",
-    "emby1.798777.xyz":   "https://link01.okemby.org:8443",
-    "emby2.798777.xyz":   "https://emos.best:443"
+    "emby.798777.xyz":   "https://link01.okemby.org:8443",
+    "emby1.798777.xyz":  "https://link01.okemby.org:8443",
+    "emby2.798777.xyz":  "https://emos.best:443"
   },
   cors: true
 };
@@ -55,14 +55,13 @@ export default {
     const isEmos = host === 'emby2.798777.xyz';
     const tUrl   = new URL(target);
 
-    /* ===== 2️⃣ 图片直连策略（TV 稳定关键）===== */
+    /* ===== 2️⃣ 图片直连策略 ===== */
     const isImage =
       req.method === 'GET' &&
       rawUrl.pathname.startsWith('/emby/Items/') &&
       rawUrl.pathname.includes('/Images/') &&
-      !req.headers.has('Range'); // ⭐ 防 TV 偶发 Range 花图
+      !req.headers.has('Range');
 
-    // 非 EMOS：图片直接 302 回源
     if (!isEmos && isImage) {
       const direct = new URL(rawUrl.pathname + rawUrl.search, tUrl);
       return Response.redirect(direct.toString(), 302);
@@ -71,17 +70,16 @@ export default {
     /* ===== 3️⃣ 构造上游 URL ===== */
     const finalUrl = new URL(rawUrl.pathname + rawUrl.search, tUrl);
 
-    /* ===== 4️⃣ 构造请求头（最小干预）===== */
+    /* ===== 4️⃣ 构造请求头 ===== */
     const h = new Headers(req.headers);
 
-    // 始终使用真实上游 Host（播放器兼容关键）
+    // ✅ 统一 Host（连接池合并关键）
     h.set('Host', tUrl.host);
 
     if (isEmos) {
       const origin = `${tUrl.protocol}//${tUrl.hostname}`;
       h.set('Origin', origin);
       h.set('Referer', origin);
-
       h.set('EMOS-PROXY-ID', EMOS_ID);
       h.set('EMOS-PROXY-NAME', EMOS_NAME);
 
@@ -95,16 +93,25 @@ export default {
       res = await fetch(new Request(finalUrl.toString(), {
         method: req.method,
         headers: h,
-        body: req.body,
+        body: (req.method === 'GET' || req.method === 'HEAD') ? null : req.body,
         redirect: 'follow',
-        duplex: 'half' // ⭐ Android / iOS / TV 播放稳定关键
-      }));
+        duplex: 'half'
+      }), {
+        cf: {
+          cacheTtl: 0,
+          cacheEverything: false,
+          httpProtocol: "http2"
+        }
+      });
     } catch (e) {
       return new Response('Upstream error', { status: 502 });
     }
 
     /* ===== 6️⃣ 返回响应 ===== */
     const resH = new Headers(res.headers);
+
+    // 强制禁止媒体缓存（避免 Range 异常）
+    resH.set('Cache-Control', 'no-store');
 
     if (mapCfg.cors) {
       resH.set('Access-Control-Allow-Origin', '*');
