@@ -18,7 +18,7 @@ const mapCfg = {
   hosts: {
     "emby.798777.xyz":   "https://link01.okemby.org:8443",
     "emby1.798777.xyz":  "https://link01.okemby.org:8443",
-    "emby2.798777.xyz":  "https://emos.best:443"
+    "emby2.798777.xyz":  "https://video.emos.best:443"
   },
   cors: true
 };
